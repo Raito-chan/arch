@@ -1,5 +1,56 @@
 set -euo pipefail
 
+# -----------------------------
+# Bootstrap for minimal installs
+# -----------------------------
+
+# Require Arch
+require_arch() {
+    [[ -f /etc/arch-release ]] || { echo "Arch only"; exit 1; }
+}
+require_arch
+
+# If sudo is missing, install it as root (or via su)
+bootstrap_sudo() {
+    if command -v sudo >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo "[BOOTSTRAP] sudo not found. Installing sudo..."
+
+    if [[ $EUID -eq 0 ]]; then
+        pacman -Sy --noconfirm sudo
+    elif command -v su >/dev/null 2>&1; then
+        su -c "pacman -Sy --noconfirm sudo"
+    else
+        echo "sudo is missing and 'su' is unavailable. Run this script as root once."
+        exit 1
+    fi
+}
+
+# Ensure multilib repo exists and is enabled
+ensure_multilib() {
+    if grep -Eq '^\[multilib\]' /etc/pacman.conf && grep -Eq '^Include = /etc/pacman.d/mirrorlist' /etc/pacman.conf; then
+        echo "[BOOTSTRAP] multilib repo already present"
+        return 0
+    fi
+
+    echo "[BOOTSTRAP] Enabling multilib repo..."
+
+    # If commented out, uncomment it
+    if grep -Eq '^#\[multilib\]' /etc/pacman.conf; then
+        sudo sed -i '/^#\[multilib\]/,/^#Include = \/etc\/pacman.d\/mirrorlist/ s/^#//' /etc/pacman.conf
+    # If not present at all, append it
+    elif ! grep -Eq '^\[multilib\]' /etc/pacman.conf; then
+        printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' | sudo tee -a /etc/pacman.conf >/dev/null
+    fi
+
+    sudo pacman -Sy --noconfirm
+}
+
+bootstrap_sudo
+ensure_multilib
+
 sudo -v
 
 bold=$(tput bold)
