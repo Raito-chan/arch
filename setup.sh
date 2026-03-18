@@ -59,6 +59,9 @@ orange=$(tput setaf 202)
 red=$(tput setaf 1)
 reset=$(tput sgr0)
 
+LOG="${HOME}/arch-setup.log"
+: > "$LOG"
+
 while true; do sudo -v; sleep 60; done &
 KEEPALIVE=$!
 trap 'kill $KEEPALIVE' EXIT
