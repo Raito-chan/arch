@@ -1,4 +1,4 @@
-set -euo pipefail
+set -uo pipefail
 
 # -----------------------------
 # Bootstrap for minimal installs
@@ -134,8 +134,91 @@ run_step "Setting up Chaotic-AUR" setup_chaotic_aur
 
 device=$(gum choose "Desktop" "Laptop" "WSL" --header $"\e[1mSelect install platform\e0m" --prompt.foreground "#03a5fc" --header.foreground "#03a5fc")
 
-# Networking
+# Setting up user account for WSL
+USERNAME=""
+create_user() {
+    while true; do
+        # Username input
+        USERNAME=$(gum input --placeholder "Enter new username" --cursor.foreground "#03a5fc")
 
+        if [[ -z "$USERNAME" ]]; then
+            gum style --foreground 1 "Username cannot be empty"
+            continue
+        fi
+
+        if id "$USERNAME" &>/dev/null; then
+            gum style --foreground 1 "User already exists"
+            continue
+        fi
+
+        # Password input
+        PASSWORD=$(gum input --password --placeholder "Enter password" --cursor.foreground "#03a5fc")
+        CONFIRM_PASSWORD=$(gum input --password --placeholder "Confirm password" --cursor.foreground "#03a5fc")
+
+        if [[ "$PASSWORD" != "$CONFIRM_PASSWORD" ]]; then
+            gum style --foreground 1 "Passwords do not match"
+            continue
+        fi
+
+        if [[ -z "$PASSWORD" ]]; then
+            gum style --foreground 1 "Password cannot be empty"
+            continue
+        fi
+
+        # Create user
+        if ! sudo useradd -m -G wheel -s /bin/zsh "$USERNAME"; then
+            gum style --foreground 1 "Failed to create user"
+            continue
+        fi
+
+        # Set password
+        if ! echo "$USERNAME:$PASSWORD" | sudo chpasswd; then
+            gum style --foreground 1 "Failed to set password"
+            continue
+        fi
+
+        # Enable sudo for wheel group
+        if ! sudo grep -q "^%wheel ALL=(ALL:ALL) ALL" /etc/sudoers; then
+            echo "%wheel ALL=(ALL:ALL) ALL" | sudo EDITOR='tee -a' visudo >/dev/null
+        fi
+
+        gum style --foreground 2 "User $USERNAME created successfully"
+
+        echo "$USERNAME"
+        return 0
+    done
+}
+
+set_wsl_default_user() {
+    local WSL_CONF="/etc/wsl.conf"
+
+    # Create file if it doesn't exist
+    if [ ! -f "$WSL_CONF" ]; then
+        sudo touch "$WSL_CONF"
+    fi
+
+    # If [user] section exists, replace default line or add it
+    if grep -q "^\[user\]" "$WSL_CONF"; then
+        if grep -q "^default=" "$WSL_CONF"; then
+            sudo sed -i "s/^default=.*/default=$USERNAME/" "$WSL_CONF"
+        else
+            sudo sed -i "/^\[user\]/a default=$USERNAME" "$WSL_CONF"
+        fi
+    else
+        # Append full section
+        echo -e "\n[user]\ndefault=$USERNAME" | sudo tee -a "$WSL_CONF" >/dev/null
+    fi
+
+    echo "WSL default user set to $USERNAME"
+}
+
+if [[ "$device" == "WSL" ]]; then
+	USERNAME=$(create_user)
+
+	run_step "Configuring user account for WSL" set_wsl_default_user
+fi
+
+# Networking
 config_network() {
 	if [ ! -f "/etc/NetworkManager/conf.d/priority.conf" ]; then
 		sudo systemctl enable --now NetworkManager.service
@@ -296,95 +379,17 @@ setup_dotfiles () {
 		git clone https://github.com/Raito-chan/.dotfiles.git $HOME/.dotfiles
 		rcup -f
 	else
-		echo "${bold}${green}=====Skipping dotfiles setup=====${reset}"
+		return 1
 	fi
 }
 
 run_step "Fetching and placing dotfiles from gitrepo" setup_dotfiles
 
-# Setting up user account for WSL
-create_user() {
-    while true; do
-        # Username input
-        USERNAME=$(gum input --placeholder "Enter new username")
+run_step "Changing default user shell to ZSH" bash -c '
+sudo chsh -s /bin/zsh "$USERNAME"
+'
 
-        if [[ -z "$USERNAME" ]]; then
-            gum style --foreground 1 "Username cannot be empty"
-            continue
-        fi
 
-        if id "$USERNAME" &>/dev/null; then
-            gum style --foreground 1 "User already exists"
-            continue
-        fi
-
-        # Password input
-        PASSWORD=$(gum input --password --placeholder "Enter password")
-        CONFIRM_PASSWORD=$(gum input --password --placeholder "Confirm password")
-
-        if [[ "$PASSWORD" != "$CONFIRM_PASSWORD" ]]; then
-            gum style --foreground 1 "Passwords do not match"
-            continue
-        fi
-
-        if [[ -z "$PASSWORD" ]]; then
-            gum style --foreground 1 "Password cannot be empty"
-            continue
-        fi
-
-        # Create user
-        if ! sudo useradd -m -G wheel -s /bin/zsh "$USERNAME"; then
-            gum style --foreground 1 "Failed to create user"
-            continue
-        fi
-
-        # Set password
-        if ! echo "$USERNAME:$PASSWORD" | sudo chpasswd; then
-            gum style --foreground 1 "Failed to set password"
-            continue
-        fi
-
-        # Enable sudo for wheel group
-        if ! sudo grep -q "^%wheel ALL=(ALL:ALL) ALL" /etc/sudoers; then
-            echo "%wheel ALL=(ALL:ALL) ALL" | sudo EDITOR='tee -a' visudo >/dev/null
-        fi
-
-        gum style --foreground 2 "User $USERNAME created successfully"
-
-        echo "$USERNAME"
-        return 0
-    done
-}
-
-set_wsl_default_user() {
-    local USERNAME="$1"
-    local WSL_CONF="/etc/wsl.conf"
-
-    # Create file if it doesn't exist
-    if [ ! -f "$WSL_CONF" ]; then
-        sudo touch "$WSL_CONF"
-    fi
-
-    # If [user] section exists, replace default line or add it
-    if grep -q "^\[user\]" "$WSL_CONF"; then
-        if grep -q "^default=" "$WSL_CONF"; then
-            sudo sed -i "s/^default=.*/default=$USERNAME/" "$WSL_CONF"
-        else
-            sudo sed -i "/^\[user\]/a default=$USERNAME" "$WSL_CONF"
-        fi
-    else
-        # Append full section
-        echo -e "\n[user]\ndefault=$USERNAME" | sudo tee -a "$WSL_CONF" >/dev/null
-    fi
-
-    echo "WSL default user set to $USERNAME"
-}
-
-if [[ "$device" == "WSL" ]]; then
-	USERNAME=$(create_user)
-
-	run_step "Configuring user account for WSL" set_wsl_default_user "$USERNAME"
-fi
 
 # Cleanup
 run_step "Cleaning up after isntall" bash -c '
