@@ -75,48 +75,49 @@ run_step() {
 
     printf "[ .... ] %s" "$msg"
 
-    # Start command in background
     "$@" >>"$LOG" 2>&1 &
     pid=$!
-	#"$@" 2>&1 | tee -a "$LOG" &
-    #pid=$!
+
+    # Snapshot log size at step start so we only tail *this* step's output
+    local log_start
+    log_start=$(wc -l < "$LOG" 2>/dev/null || echo 0)
 
     spin='-\|/'
     i=0
-
-    # Track last printed line
     local last_line=""
+    local term_width
+    term_width=$(tput cols)
+    local max_suffix=$(( term_width - ${#msg} - 12 ))
+    [[ $max_suffix -lt 10 ]] && max_suffix=10
 
     while kill -0 $pid 2>/dev/null; do
         i=$(( (i+1) %4 ))
 
-        # Get latest line from log
         if [[ -f "$LOG" ]]; then
-            new_line=$(tail -n 1 "$LOG")
-            if [[ "$new_line" != "$last_line" ]]; then
-                last_line="$new_line"
-            fi
+            new_line=$(tail -n +"$log_start" "$LOG" | tail -n 1)
+            [[ -n "$new_line" ]] && last_line="$new_line"
         fi
 
-        # Print spinner + last log line (trim to avoid breaking UI)
-        printf "\r\033[K[  %c   ] %s | %s" "${spin:$i:1}" "$msg" "${bold}${grey}${last_line:0:80}${reset}"
+        printf "\r\033[K[  %c   ] %s | %s" "${spin:$i:1}" "$msg" "${bold}${grey}${last_line:0:$max_suffix}${reset}"
         sleep 0.1
     done
 
-	last_line=$(tail -n 1 "$LOG")
-	printf "\r\033[K[  %c   ] %s | %s" "-" "$msg" "${bold}${grey}${last_line:0:80}${reset}"
+    last_line=$(tail -n +"$log_start" "$LOG" | tail -n 1)
+    printf "\r\033[K[  %c   ] %s | %s" "-" "$msg" "${bold}${grey}${last_line:0:$max_suffix}${reset}"
 
     wait $pid
     status=$?
 
     if [ $status -eq 0 ]; then
-        printf "\r${bold}${green}[  OK   ]${reset} %s\n" "$msg"
+        printf "\r\033[K${bold}${green}[  OK   ]${reset} %s\n" "$msg"
     else
-        printf "\r${bold}${red}[ FAIL  ]${reset} %s (see $LOG)\n" "$msg"
+        printf "\r\033[K${bold}${red}[ FAIL  ]${reset} %s (see $LOG)\n" "$msg"
     fi
 }
 pkg(){ sudo pacman --noconfirm --needed -S "$@"; }
 aur(){ yay -S --noconfirm --needed "$@"; }
+export -f pkg
+export -f aur
 
 run_step "Installing essential packages" pkg git base-devel curl wget openssh zsh gum
 
@@ -151,15 +152,11 @@ setup_chaotic_aur() {
 }
 run_step "Setting up Chaotic-AUR" setup_chaotic_aur
 
-echo "hiiii"
 device=$(gum choose "Desktop" "Laptop" "WSL" --header $'\e[1mSelect install platform\e[0m' --cursor.foreground "#03a5fc" --header.foreground "#03a5fc" --cursor "• " 2>/dev/tty)
-
-echo "hello?"
 
 # Setting up user account for WSL
 USERNAME=""
 create_user() {
-	echo "bullshit"
     while true; do
         # Username input
         USERNAME=$(gum input --placeholder "Enter new username" --cursor.foreground "#03a5fc")
@@ -203,7 +200,7 @@ create_user() {
 
         gum style --foreground 2 "User $USERNAME created successfully" >&2
 
-        echo "$USERNAME"
+        export USERNAME
         return 0
     done
 }
@@ -232,9 +229,32 @@ set_wsl_default_user() {
 }
 
 if [[ "$device" == "WSL" ]]; then
-	USERNAME=$(create_user)
+    # Set root password if not set
+    root_pw=$(sudo getent shadow root | cut -d: -f2)
+    if [[ "$root_pw" == "!" || "$root_pw" == "*" || -z "$root_pw" ]]; then
+        if gum confirm "No root password set. Set one now?" --affirmative "Yes" --negative "Skip" </dev/tty 2>/dev/tty; then
+            while true; do
+                ROOT_PASS=$(gum input --password --placeholder "Enter root password" --cursor.foreground "#03a5fc" </dev/tty 2>/dev/tty)
+                ROOT_PASS_CONFIRM=$(gum input --password --placeholder "Confirm root password" --cursor.foreground "#03a5fc" </dev/tty 2>/dev/tty)
+                if [[ "$ROOT_PASS" != "$ROOT_PASS_CONFIRM" ]]; then
+                    gum style --foreground 1 "Passwords do not match, try again" >&2
+                    continue
+                fi
+                if [[ -z "$ROOT_PASS" ]]; then
+                    gum style --foreground 1 "Password cannot be empty" >&2
+                    continue
+                fi
+                echo "root:$ROOT_PASS" | sudo chpasswd
+                gum style --foreground 2 "Root password set successfully" >&2
+                break
+            done
+        fi
+    fi
 
-	run_step "Configuring user account for WSL" set_wsl_default_user
+    if gum confirm "Create a new user?" --affirmative "Yes" --negative "No" </dev/tty 2>/dev/tty; then
+        USERNAME=$(create_user)
+        run_step "Configuring user account for WSL" set_wsl_default_user
+    fi
 fi
 
 # Networking
@@ -390,7 +410,7 @@ setup_git_ssh() {
 	fi
 }
 
-run_step "Fetching and configuring git ssh keys from local server" setup_git_ssh
+# run_step "Fetching and configuring git ssh keys from local server" setup_git_ssh
 
 # Dotfiles
 setup_dotfiles () {
@@ -406,7 +426,8 @@ setup_dotfiles () {
 run_step "Fetching and placing dotfiles from gitrepo" setup_dotfiles
 
 run_step "Changing default user shell to ZSH" bash -c '
-sudo chsh -s /bin/zsh "$USERNAME"
+TARGET="${USERNAME:-$USER}"
+sudo chsh -s /bin/zsh "$TARGET"
 '
 
 
