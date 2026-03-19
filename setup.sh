@@ -100,9 +100,11 @@ run_step() {
 
         # Print spinner + last log line (trim to avoid breaking UI)
         printf "\r\033[K[  %c   ] %s | %s" "${spin:$i:1}" "$msg" "${bold}${grey}${last_line:0:80}${reset}"
-
         sleep 0.1
     done
+
+	last_line=$(tail -n 1 "$LOG")
+	printf "\r\033[K[  %c   ] %s | %s" "-" "$msg" "${bold}${grey}${last_line:0:80}${reset}"
 
     wait $pid
     status=$?
@@ -348,6 +350,7 @@ if [[ "$device" != "WSL" ]]; then
 			echo "Installing Intel Vulkan drivers..."
 			sudo pacman -S --noconfirm --needed vulkan-intel
 			sudo pacman -S --noconfirm --needed lib32-vulkan-intel
+			;;
 		*)
 			echo "Unknown or unsupported GPU vendor. Skipping steam install."
 			return 1
