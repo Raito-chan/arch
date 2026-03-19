@@ -149,6 +149,8 @@ run_step "Setting up Chaotic-AUR" setup_chaotic_aur
 
 device=$(gum choose "Desktop" "Laptop" "WSL" --header $'\e[1mSelect install platform\e[0m' --cursor.foreground "#03a5fc" --header.foreground "#03a5fc" --cursor "• " 2>/dev/tty)
 
+echo "hello?"
+
 # Setting up user account for WSL
 USERNAME=""
 create_user() {
