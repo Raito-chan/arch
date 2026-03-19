@@ -97,7 +97,7 @@ run_step() {
         fi
 
         # Print spinner + last log line (trim to avoid breaking UI)
-        printf "\r\033[K[  %c   ] %s | %s" "${spin:$i:1}" "$msg" "${last_line:0:80}"
+        printf "\r\033[K[  %c   ] %s | %s" "${spin:$i:1}" "$msg | " "${last_line:0:80}"
 
         sleep 0.1
     done
@@ -141,7 +141,7 @@ setup_chaotic_aur() {
 			return 1
 		fi
 	else
-		echo "${bold}${orange}Chaotic-AUR already installed or not an x86_64 system${reset}"
+		echo "${orange}Chaotic-AUR already installed or not an x86_64 system${reset}"
 		return 0
 	fi
 }
@@ -157,12 +157,12 @@ create_user() {
         USERNAME=$(gum input --placeholder "Enter new username" --cursor.foreground "#03a5fc")
 
         if [[ -z "$USERNAME" ]]; then
-            gum style --foreground 1 "Username cannot be empty"
+            gum style --foreground 1 "Username cannot be empty" >&2
             continue
         fi
 
         if id "$USERNAME" &>/dev/null; then
-            gum style --foreground 1 "User already exists"
+            gum style --foreground 1 "User already exists" >&2
             continue
         fi
 
@@ -171,33 +171,28 @@ create_user() {
         CONFIRM_PASSWORD=$(gum input --password --placeholder "Confirm password" --cursor.foreground "#03a5fc")
 
         if [[ "$PASSWORD" != "$CONFIRM_PASSWORD" ]]; then
-            gum style --foreground 1 "Passwords do not match"
+            gum style --foreground 1 "Passwords do not match" >&2
             continue
         fi
 
         if [[ -z "$PASSWORD" ]]; then
-            gum style --foreground 1 "Password cannot be empty"
+            gum style --foreground 1 "Password cannot be empty" >&2
             continue
         fi
 
         # Create user
-        if ! sudo useradd -m -G wheel -s /bin/zsh "$USERNAME"; then
-            gum style --foreground 1 "Failed to create user"
+        if ! sudo useradd -m -G sudo -s /bin/zsh "$USERNAME"; then
+            gum style --foreground 1 "Failed to create user" >&2
             continue
         fi
 
         # Set password
         if ! echo "$USERNAME:$PASSWORD" | sudo chpasswd; then
-            gum style --foreground 1 "Failed to set password"
+            gum style --foreground 1 "Failed to set password" >&2
             continue
         fi
 
-        # Enable sudo for wheel group
-        if ! sudo grep -q "^%wheel ALL=(ALL:ALL) ALL" /etc/sudoers; then
-            echo "%wheel ALL=(ALL:ALL) ALL" | sudo EDITOR='tee -a' visudo >/dev/null
-        fi
-
-        gum style --foreground 2 "User $USERNAME created successfully"
+        gum style --foreground 2 "User $USERNAME created successfully" >&2
 
         echo "$USERNAME"
         return 0
@@ -213,8 +208,8 @@ set_wsl_default_user() {
     fi
 
     # If [user] section exists, replace default line or add it
-    if grep -q "^\[user\]" "$WSL_CONF"; then
-        if grep -q "^default=" "$WSL_CONF"; then
+    if sudo grep -q "^\[user\]" "$WSL_CONF"; then
+        if sudo grep -q "^default=" "$WSL_CONF"; then
             sudo sed -i "s/^default=.*/default=$USERNAME/" "$WSL_CONF"
         else
             sudo sed -i "/^\[user\]/a default=$USERNAME" "$WSL_CONF"
