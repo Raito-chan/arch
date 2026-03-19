@@ -73,32 +73,44 @@ run_step() {
     local msg="$1"
     shift
 
-    echo -e "\n[START] $msg"
-    echo "[CMD] $*" | tee -a "$LOG"
+    printf "[ .... ] %s" "$msg"
 
-    # Run command with live output + log
-    "$@" 2>&1 | tee -a "$LOG" &
+    # Start command in background
+    "$@" >>"$LOG" 2>&1 &
     pid=$!
+	#"$@" 2>&1 | tee -a "$LOG" &
+    #pid=$!
 
     spin='-\|/'
     i=0
 
-    while kill -0 "$pid" 2>/dev/null; do
+    # Track last printed line
+    local last_line=""
+
+    while kill -0 $pid 2>/dev/null; do
         i=$(( (i+1) %4 ))
-        printf "\r[%c] %s" "${spin:$i:1}" "$msg"
+
+        # Get latest line from log
+        if [[ -f "$LOG" ]]; then
+            new_line=$(tail -n 1 "$LOG")
+            if [[ "$new_line" != "$last_line" ]]; then
+                last_line="$new_line"
+            fi
+        fi
+
+        # Print spinner + last log line (trim to avoid breaking UI)
+        printf "\r\033[K[  %c   ] %s | %s" "${spin:$i:1}" "$msg" "${last_line:0:80}"
+
         sleep 0.1
     done
 
-    wait "$pid"
+    wait $pid
     status=$?
 
-    if [[ $status -eq 0 ]]; then
-        echo -e "\r[ OK ] $msg"
+    if [ $status -eq 0 ]; then
+        printf "\r${bold}${green}[  OK   ]${reset} %s\n" "$msg"
     else
-        echo -e "\r[FAIL] $msg (exit code $status)"
-        echo "---- last log lines ----"
-        tail -n 10 "$LOG"
-        echo "------------------------"
+        printf "\r${bold}${red}[ FAIL  ]${reset} %s (see $LOG)\n" "$msg"
     fi
 }
 pkg(){ sudo pacman --noconfirm --needed -S "$@"; }
