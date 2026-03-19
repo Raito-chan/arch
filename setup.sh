@@ -75,15 +75,30 @@ run_step() {
 
     printf "[ .... ] %s" "$msg"
 
+    # Start command in background
     "$@" >>"$LOG" 2>&1 &
     pid=$!
 
     spin='-\|/'
     i=0
 
+    # Track last printed line
+    local last_line=""
+
     while kill -0 $pid 2>/dev/null; do
         i=$(( (i+1) %4 ))
-        printf "\r[  %c   ] %s" "${spin:$i:1}" "$msg"
+
+        # Get latest line from log
+        if [[ -f "$LOG" ]]; then
+            new_line=$(tail -n 1 "$LOG")
+            if [[ "$new_line" != "$last_line" ]]; then
+                last_line="$new_line"
+            fi
+        fi
+
+        # Print spinner + last log line (trim to avoid breaking UI)
+        printf "\r[  %c   ] %s | %s" "${spin:$i:1}" "$msg" "${last_line:0:80}"
+
         sleep 0.1
     done
 
