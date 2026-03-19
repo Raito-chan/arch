@@ -97,7 +97,7 @@ run_step() {
         fi
 
         # Print spinner + last log line (trim to avoid breaking UI)
-        printf "\r[  %c   ] %s | %s" "${spin:$i:1}" "$msg" "${last_line:0:80}"
+        printf "\r\033[K[  %c   ] %s | %s" "${spin:$i:1}" "$msg" "${last_line:0:80}"
 
         sleep 0.1
     done
