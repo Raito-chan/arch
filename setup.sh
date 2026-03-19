@@ -46,6 +46,13 @@ ensure_multilib() {
 
     sudo pacman -Sy --noconfirm
 }
+grant_nopasswd() {
+    echo "$USERNAME ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/tmp-setup >/dev/null
+}
+
+revoke_nopasswd() {
+    sudo rm -f /etc/sudoers.d/tmp-setup
+}
 
 bootstrap_sudo
 ensure_multilib
@@ -64,11 +71,67 @@ LOG="${HOME}/arch-setup.log"
 
 while true; do sudo -v; sleep 60; done &
 KEEPALIVE=$!
-trap 'kill $KEEPALIVE' EXIT
+trap 'kill $KEEPALIVE; revoke_nopasswd' EXIT
 
 # sudo pacman -Syu --noconfirm
 
 require_arch(){ [[ -f /etc/arch-release ]] || { echo "Arch only"; exit 1; }; }
+
+# run_step() {
+#     local msg="$1"
+#     shift
+
+#     printf "[ .... ] %s" "$msg"
+
+#     # Use a per-step temp file so output is isolated and can be tailed cleanly
+#     local step_log
+#     step_log=$(mktemp)
+
+#     "$@" >>"$step_log" 2>&1 &
+#     pid=$!
+
+#     spin='-\|/'
+#     i=0
+#     local last_line=""
+#     local term_width
+#     term_width=$(tput cols)
+#     local max_suffix=$(( term_width - ${#msg} - 12 ))
+#     [[ $max_suffix -lt 10 ]] && max_suffix=10
+
+#     while kill -0 $pid 2>/dev/null; do
+#         i=$(( (i+1) % 4 ))
+
+#         if [[ -f "$step_log" ]]; then
+#             new_line=$(tail -n 1 "$step_log")
+#             [[ -n "$new_line" ]] && last_line="$new_line"
+#         fi
+
+#         printf "\r\033[K[  %c   ] %s | %s" "${spin:$i:1}" "$msg" "${bold}${grey}${last_line:0:$max_suffix}${reset}"
+#         sleep 0.1
+#     done
+
+#     last_line=$(tail -n 1 "$step_log")
+#     printf "\r\033[K[  %c   ] %s | %s" "-" "$msg" "${bold}${grey}${last_line:0:$max_suffix}${reset}"
+
+#     wait $pid
+#     local status=$?
+
+#     # Append a header + last 100 lines of this step's output to the main log
+#     {
+#         printf '\n=== %s ===\n' "$msg"
+#         tail -n 100 "$step_log"
+#     } >> "$LOG"
+
+#     rm -f "$step_log"
+
+#     if [ $status -eq 0 ]; then
+#         printf "\r\033[K${bold}${green}[  OK   ]${reset} %s\n" "$msg"
+#     else
+#         printf "\r\033[K${bold}${red}[ FAIL  ]${reset} %s (see $LOG)\n" "$msg"
+#     fi
+
+#     return $status
+# }
 run_step() {
     local msg="$1"
     shift
@@ -81,6 +144,8 @@ run_step() {
     # Snapshot log size at step start so we only tail *this* step's output
     local log_start
     log_start=$(wc -l < "$LOG" 2>/dev/null || echo 0)
+
+	printf '\n=== %s ===\n' "$msg" >> "$LOG"
 
     spin='-\|/'
     i=0
@@ -102,20 +167,32 @@ run_step() {
         sleep 0.1
     done
 
-    last_line=$(tail -n +"$log_start" "$LOG" | tail -n 1)
-    printf "\r\033[K[  %c   ] %s | %s" "-" "$msg" "${bold}${grey}${last_line:0:$max_suffix}${reset}"
+    # last_line=$(tail -n +"$log_start" "$LOG" | tail -n 1)
+    # printf "\r\033[K[  %c   ] %s | %s" "-" "$msg" "${bold}${grey}${last_line:0:$max_suffix}${reset}"
 
     wait $pid
     status=$?
 
+	
+
     if [ $status -eq 0 ]; then
-        printf "\r\033[K${bold}${green}[  OK   ]${reset} %s\n" "$msg"
+        printf "\r\033[K${bold}${green}[  OK   ]${reset} %s\n" "$msg" 
     else
         printf "\r\033[K${bold}${red}[ FAIL  ]${reset} %s (see $LOG)\n" "$msg"
     fi
+
 }
+
 pkg(){ sudo pacman --noconfirm --needed -S "$@"; }
-aur(){ yay -S --noconfirm --needed "$@"; }
+aur(){
+    local run_as="${USERNAME:-$USER}"
+    if [[ "$run_as" == "root" ]]; then
+		echo "Username at time: $USERNAME" >&2
+        echo "ERROR: Cannot run yay as root" >&2
+        return 1
+    fi
+    sudo -u "$run_as" yay -S --noconfirm --needed "$@"
+}
 export -f pkg
 export -f aur
 
@@ -158,8 +235,7 @@ device=$(gum choose "Desktop" "Laptop" "WSL" --header $'\e[1mSelect install plat
 USERNAME=""
 create_user() {
     while true; do
-        # Username input
-        USERNAME=$(gum input --placeholder "Enter new username" --cursor.foreground "#03a5fc")
+        USERNAME=$(gum input --placeholder "Enter new username" --cursor.foreground "#03a5fc" </dev/tty 2>/dev/tty)
 
         if [[ -z "$USERNAME" ]]; then
             gum style --foreground 1 "Username cannot be empty" >&2
@@ -171,9 +247,8 @@ create_user() {
             continue
         fi
 
-        # Password input
-        PASSWORD=$(gum input --password --placeholder "Enter password" --cursor.foreground "#03a5fc")
-        CONFIRM_PASSWORD=$(gum input --password --placeholder "Confirm password" --cursor.foreground "#03a5fc")
+        PASSWORD=$(gum input --password --placeholder "Enter password" --cursor.foreground "#03a5fc" </dev/tty 2>/dev/tty)
+        CONFIRM_PASSWORD=$(gum input --password --placeholder "Confirm password" --cursor.foreground "#03a5fc" </dev/tty 2>/dev/tty)
 
         if [[ "$PASSWORD" != "$CONFIRM_PASSWORD" ]]; then
             gum style --foreground 1 "Passwords do not match" >&2
@@ -185,27 +260,27 @@ create_user() {
             continue
         fi
 
-        # Create user
         if ! sudo useradd -m -G wheel -s /bin/zsh "$USERNAME"; then
             gum style --foreground 1 "Failed to create user" >&2
-			sudo sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
             continue
         fi
 
-        # Set password
         if ! echo "$USERNAME:$PASSWORD" | sudo chpasswd; then
             gum style --foreground 1 "Failed to set password" >&2
             continue
         fi
 
-        gum style --foreground 2 "User $USERNAME created successfully" >&2
+        # Grant wheel group sudo access
+        sudo sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
-        export USERNAME
+        gum style --foreground 2 "User $USERNAME created successfully" >&2
+        echo "$USERNAME"
         return 0
     done
 }
 
 set_wsl_default_user() {
+	local USERNAME="$1"
     local WSL_CONF="/etc/wsl.conf"
 
     # Create file if it doesn't exist
@@ -229,6 +304,9 @@ set_wsl_default_user() {
 }
 
 if [[ "$device" == "WSL" ]]; then
+	run_step "Setting locale for WSL" bash -c '
+	sudo locale-gen en_US.UTF-8
+	'
     # Set root password if not set
     root_pw=$(sudo getent shadow root | cut -d: -f2)
     if [[ "$root_pw" == "!" || "$root_pw" == "*" || -z "$root_pw" ]]; then
@@ -253,7 +331,9 @@ if [[ "$device" == "WSL" ]]; then
 
     if gum confirm "Create a new user?" --affirmative "Yes" --negative "No" </dev/tty 2>/dev/tty; then
         USERNAME=$(create_user)
-        run_step "Configuring user account for WSL" set_wsl_default_user
+		export USERNAME
+		grant_nopasswd
+        run_step "Configuring user account for WSL" set_wsl_default_user "$USERNAME"
     fi
 fi
 
@@ -391,36 +471,40 @@ if [[ "$device" != "WSL" ]]; then
 
 fi
 
-# Setup git ssh keys (bad idea, would not recommend)
 setup_git_ssh() {
-	if [ ! -f "$HOME/.ssh/raito-gh" ]; then
-		wget -P ~/Downloads http://local.get/git-keys.zip
-		unzip ~/Downloads/git-keys.zip -d ~/.ssh/
+    local target_user="${USERNAME:-$USER}"
+    local target_home=$(getent passwd "$target_user" | cut -d: -f6)
 
-		chmod 700 ~/.ssh
-		chmod 600 ~/.ssh/raito-gh
-		chmod 644 ~/.ssh/raito-gh.pub
-		chmod 600 ~/.ssh/sh-gh
-		chmod 644 ~/.ssh/sh-gh.pub
-		chmod 600 ~/.ssh/sh-gt
-		chmod 644 ~/.ssh/sh-gt.pub
-		return 0
-	else
-		return 1
-	fi
+    if [ ! -f "$target_home/.ssh/raito-gh" ]; then
+        sudo -u "$target_user" wget -P "$target_home/Downloads" http://local.get/git-keys.zip
+        sudo -u "$target_user" unzip "$target_home/Downloads/git-keys.zip" -d "$target_home/.ssh/"
+
+        chmod 700 "$target_home/.ssh"
+        chmod 600 "$target_home/.ssh/raito-gh"
+        chmod 644 "$target_home/.ssh/raito-gh.pub"
+        chmod 600 "$target_home/.ssh/sh-gh"
+        chmod 644 "$target_home/.ssh/sh-gh.pub"
+        chmod 600 "$target_home/.ssh/sh-gt"
+        chmod 644 "$target_home/.ssh/sh-gt.pub"
+        chown -R "$target_user:$target_user" "$target_home/.ssh"
+        return 0
+    else
+        return 1
+    fi
 }
+run_step "Fetching and configuring git ssh keys from local server" setup_git_ssh
 
-# run_step "Fetching and configuring git ssh keys from local server" setup_git_ssh
+setup_dotfiles() {
+    local target_user="${USERNAME:-$USER}"
+    local target_home=$(getent passwd "$target_user" | cut -d: -f6)
 
-# Dotfiles
-setup_dotfiles () {
-	if [ ! -d "$HOME/.dotfiles" ]; then
-		mkdir $HOME/.dotfiles
-		git clone https://github.com/Raito-chan/.dotfiles.git $HOME/.dotfiles
-		rcup -f
-	else
-		return 1
-	fi
+    if [ ! -d "$target_home/.dotfiles" ]; then
+        sudo -u "$target_user" mkdir "$target_home/.dotfiles"
+        sudo -u "$target_user" git clone https://github.com/Raito-chan/.dotfiles.git "$target_home/.dotfiles"
+        sudo -u "$target_user" rcup -f
+    else
+        return 1
+    fi
 }
 
 run_step "Fetching and placing dotfiles from gitrepo" setup_dotfiles
@@ -435,9 +519,17 @@ sudo chsh -s /bin/zsh "$TARGET"
 # Cleanup
 run_step "Cleaning up after isntall" bash -c '
 yay -Scc --noconfirm
-yay -Rns $(pacman -Qdtq)
+orphans=$(pacman -Qdtq 2>/dev/null)
+if [[ -n "$orphans" ]]; then
+    yay -Rns --noconfirm $orphans
+else
+    echo "No orphaned packages to remove"
+fi
 rm -rf ~/.cache/yay/*
 '
+if [[ "$device" != "WSL" ]]; then
+	revoke_nopasswd
+fi
 # TODO 
 # power
 # sleep
