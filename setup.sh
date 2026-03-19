@@ -97,7 +97,7 @@ run_step() {
         fi
 
         # Print spinner + last log line (trim to avoid breaking UI)
-        printf "\r\033[K[  %c   ] %s | %s" "${spin:$i:1}" "$msg | " "${last_line:0:80}"
+        printf "\r\033[K[  %c   ] %s | %s" "${spin:$i:1}" "$msg" "${last_line:0:80}"
 
         sleep 0.1
     done
@@ -152,6 +152,7 @@ device=$(gum choose "Desktop" "Laptop" "WSL" --header $'\e[1mSelect install plat
 # Setting up user account for WSL
 USERNAME=""
 create_user() {
+	echo "bullshit"
     while true; do
         # Username input
         USERNAME=$(gum input --placeholder "Enter new username" --cursor.foreground "#03a5fc")
