@@ -31,7 +31,6 @@ bootstrap_sudo() {
 # Ensure multilib repo exists and is enabled
 ensure_multilib() {
     if grep -Eq '^\[multilib\]' /etc/pacman.conf && grep -Eq '^Include = /etc/pacman.d/mirrorlist' /etc/pacman.conf; then
-        echo "[BOOTSTRAP] multilib repo already present"
         return 0
     fi
 
@@ -188,8 +187,9 @@ create_user() {
         fi
 
         # Create user
-        if ! sudo useradd -m -G sudo -s /bin/zsh "$USERNAME"; then
+        if ! sudo useradd -m -G wheel -s /bin/zsh "$USERNAME"; then
             gum style --foreground 1 "Failed to create user" >&2
+			sudo sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
             continue
         fi
 
