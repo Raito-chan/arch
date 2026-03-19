@@ -62,9 +62,9 @@ reset=$(tput sgr0)
 LOG="${HOME}/arch-setup.log"
 : > "$LOG"
 
-#while true; do sudo -v; sleep 60; done &
-#KEEPALIVE=$!
-#trap 'kill $KEEPALIVE' EXIT
+while true; do sudo -v; sleep 60; done &
+KEEPALIVE=$!
+trap 'kill $KEEPALIVE' EXIT
 
 # sudo pacman -Syu --noconfirm
 
@@ -76,7 +76,9 @@ run_step() {
     printf "[ .... ] %s" "$msg"
 
     # Start command in background
-    "$@" >>"$LOG" 2>&1 &
+    #"$@" >>"$LOG" 2>&1 &
+    #pid=$!
+	"$@" 2>&1 | tee -a "$LOG" &
     pid=$!
 
     spin='-\|/'
