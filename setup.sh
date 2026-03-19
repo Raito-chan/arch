@@ -57,6 +57,7 @@ bold=$(tput bold)
 green=$(tput setaf 2)
 orange=$(tput setaf 202)
 red=$(tput setaf 1)
+grey=$(tput dim)
 reset=$(tput sgr0)
 
 LOG="${HOME}/arch-setup.log"
@@ -99,7 +100,7 @@ run_step() {
         fi
 
         # Print spinner + last log line (trim to avoid breaking UI)
-        printf "\r\033[K[  %c   ] %s | %s" "${spin:$i:1}" "$msg" "${last_line:0:80}"
+        printf "\r\033[K[  %c   ] %s | %s" "${spin:$i:1}" "$msg" "${bold}${grey}${last_line:0:80}${reset}"
 
         sleep 0.1
     done
